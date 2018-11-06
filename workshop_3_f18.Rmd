@@ -1,0 +1,191 @@
+---
+title: 'Workshop 3: Linear Regression and Data Viz'
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+  
+---
+
+#Basic Analyses 
+
+* View data
+* Summary statistics
+
+```{r}
+library(dplyr)
+library(stringr)
+library(ggplot2)
+
+deaths_16 <- read.csv(file = "deaths_16.csv")[,-1]
+
+external_deaths_16 <- deaths_16 %>% dplyr::filter(res_status != 4, stringr::str_sub(underlying_cause,end=1) %in% c("*U","V","W","X","Y"))
+
+#Viewing data
+colnames(external_deaths_16)
+str(external_deaths_16)
+
+#Summary statistics
+summary(external_deaths_16)
+
+#Check NA
+sapply(external_deaths_16, function(x) sum(is.na(x)))
+
+```
+
+# Feature Engineering 
+
+Feature engineering is another key step that is closely related to EDA, and again can be a make-or-break step for whether you get useful, interesting results. In feature engineering, you modify existing features ot better reflect reality, or create new features that capture information that is not clear from the existing data. This is a key point where the person doing the analysis adds value through their domain-specific knowledge. 
+
+For example, if the data is marketing data or financial data, use the theory you have learned to think of what relationships you want to capture that is not clear from how the data is currently presented. 
+
+* Discretizing variables automatically coded as continuous
+  + ex. Ratings on a scale from 1-5
+* Checking variable type - character, numerical, factor
+* Log-transforming features like price
+* Decomposing existing features
+  + ex. separating month from date/time to capture seasonal effects more clearly
+
+```{r}
+external_deaths_16 <- external_deaths_16 %>%
+  mutate(place = factor(injury_place, labels = c("Home", "Residential institution", "School/institution", "Sports", "Street", 
+                                                 "Trade/service area", "Industrial/construction", "Farm", "Other specified", 
+                                                 "Other unspecified")),
+         education = ifelse(education_flag == 1, 
+                            cut(as.numeric(education_03), breaks = c(0, 2, 3, 5, 8, 9)),
+                            cut(as.numeric(education_89), breaks = c(0, 11, 12, 15, 17, 99))),
+         education = factor(education, labels = c("Less than HS", "HS/GED", "Some college", "BA+", NA)),
+         intent = factor(death_manner, labels = c("Accident", "Suicide", "Homicide","Pending","Unknown","Natural")),
+         outside_factor = as.factor(ifelse(underlying_cause %in% c("W32","W33","W34","X72","X73","X74","*U014","X93","X94","X95"),"Gun", ifelse(underlying_cause %in% c(paste0("X",c(40:44, 60:64, 85:90)), "U016","U017"), "Drugs", ifelse(underlying_cause %in% c("X78", "X99"), "Sharps", ifelse(underlying_cause %in% c("V02", "V03", "V04","V090","V092","V12","V13","V14", paste0("V19",c(0:2,4:6)), paste0("V", c(20:79,83:86)), "V803","V804","V805","V810","V811","V820","V821",paste0("V87",c(0:8)),paste0("V88",c(0:8)),"V890","V892"), "Motor Vehicles", "Other"))))),
+         age = ifelse(substr(detail_age, 1, 1) == "1", as.numeric(substr(detail_age, 2, 4)), # Year
+                        ifelse(detail_age == 9999, NA, 0)),
+         age = ifelse(age == 999, NA, age),
+         race = ifelse(hispanic > 199 & hispanic <996, "Hispanic",
+                       ifelse(race == 1, "White",
+                              ifelse(race == 2, "Black",
+                                     ifelse(as.numeric(race) >= 4 & as.numeric(race) <= 78, "Asian/Pacific Islander","Native American/Native Alaskan")))),
+         race = ifelse(is.na(race), "Unknown", race))  %>%
+  select(month, intent, sex, age, race, hispanic, place, education, outside_factor)
+
+external_deaths_16[,c(1,3,5)] <- lapply(external_deaths_16[,c(1,3,5)],as.factor)
+
+#Drop rows where age = NA
+sapply(external_deaths_16, function(x) sum(is.na(x)))
+external_deaths_16 <- subset(external_deaths_16, !is.na(age))
+```
+
+##Avoid P-hacking
+
+One thing to keep in mind as you do this step is to **avoid p-hacking**. P-hacking refers broadly to methods used to manipulate data and get a result that looks significant - e.g., has a p-value < 0.05, hence the name.
+
+If you try every single possible combination of features while doing feature engineering, you may find a combination that seems to be well-correlated with your response variable. However, this may be a spurious correlation, simply due to the sample data you happened to collect. 
+
+This is why using domain knowledge while feature engineering is essential - ideally, only create features for which there is a solid reasoning: first think of the logic of what you are trying to capture, then try to create a feature for it. This is more rigorous than making a few features, then retroactively trying to find explanations for why it may be well correlated. (That being said, people often do the latter in practice.)
+
+```{r}
+#Correlations
+#cor(external_deaths_16[,1:4])
+#pairs(external_deaths_16[,1:4])
+
+#Plotting 
+
+ggplot2::ggplot(data = external_deaths_16, ggplot2::aes(x = age)) +
+  ggplot2::geom_histogram()
+
+#BAD R CODE!
+for_loop_example <- numeric(length = nrow(external_deaths_16))
+for_loop_example <- for(i in c(1:nrow(external_deaths_16))) {
+  if(external_deaths_16$age[i] > 0) {
+    for_loop_example[i] <- 0
+  } else {
+    for_loop_example[i] <- 1
+  }
+}
+
+young_death_16 <- data.frame(external_deaths_16,  young = ifelse(external_deaths_16$age <= 18, 1, 0))
+
+ggplot2::ggplot(data = young_death_16, ggplot2::aes(x = month, y = young)) + 
+  ggplot2::geom_col()
+
+#Age by race
+ggplot2::ggplot(external_deaths_16, ggplot2::aes(x = race, y = age)) + 
+  ggplot2::geom_boxplot() + 
+  ggplot2::xlab("Race") + 
+  ggplot2::ylab("Age") + 
+  ggplot2::coord_flip()
+
+#Age by intent
+ggplot2::ggplot(external_deaths_16, ggplot2::aes(x = intent, y = age)) + 
+  ggplot2::geom_boxplot() + 
+  ggplot2::xlab("Intent") + 
+  ggplot2::ylab("Age") + 
+  ggplot2::coord_flip() + 
+  ggplot2::theme_minimal()
+
+#Density plot
+g <- ggplot(external_deaths_16, aes(x = age))
+g + geom_density(aes(fill=outside_factor), alpha=0.8) + 
+    labs(title="Density plot", 
+         subtitle="Age of Death Grouped by Outside Factor",
+         caption="Source: CDC Causes of Death",
+         x="Age",
+         fill="Outside Factor") +
+  theme_minimal()
+
+#Lollipop chart
+age_suicide <- dplyr::group_by(external_deaths_16, race) %>% dplyr::summarise(avg_age = mean(age))
+age_suicide$norm_avg <- round((age_suicide$avg_age - mean(subset(external_deaths_16, intent = "Suicide")$age))/sd(subset(external_deaths_16, intent = "Suicide")$age), 2)
+age_suicide$avg_type <- ifelse(age_suicide$norm_avg < 0, "below", "above")  # above / below avg flag
+age_suicide <- age_suicide[order(age_suicide$norm_avg), ]  # sort
+age_suicide$race <- factor(age_suicide$race, levels = age_suicide$race)  # convert to factor to retain sorted order in plot.
+
+ggplot(age_suicide, aes(x=race, y=norm_avg, label=norm_avg)) + 
+  geom_point(stat='identity', fill="black", size=6)  +
+  geom_segment(aes(y = 0, 
+                   x = race, 
+                   yend = norm_avg, 
+                   xend = race), 
+               color = "black") +
+  geom_text(color="white", size=2) +
+  labs(title="Diverging Lollipop Chart", 
+       subtitle="Normalized Average Age") + 
+  ylim(-0.5, 0.5) +
+  coord_flip()
+
+```
+
+# General Principles of Modeling
+
+Models can be built for many reasons:
+* Express unstructured/alternative data in a form that can be fed into later predictive models (ex. document term matrix, topic model)
+* Explanatory - explain relationships between response variable and some features (ex. linear regression)
+* Predict some response variable based on some features (ex. gradient boosted model)
+
+##Linear Regression
+
+*Geometric interpretation
+*Statistical interpretation
+
+```{r}
+lin_reg1 <- lm(age ~ intent,data = external_deaths_16)
+summary(lin_reg1)
+
+lin_reg2 <- lm(age ~ sex,data = external_deaths_16)
+summary(lin_reg2)
+mean(subset(external_deaths_16, sex == "F")$age)
+
+lin_reg3 <- lm(age ~ intent+race,data = external_deaths_16)
+summary(lin_reg3)
+
+lin_reg_full <- lm(age ~ .,data = external_deaths_16)
+summary(lin_reg_full)
+
+#be careful of interpretation of proxies
+proxy <- data.frame(external_deaths_16, proxy = stringr::str_length(as.character(external_deaths_16$education)))
+lm_proxy <- lm(age ~ .-education,data = proxy)
+summary(lm_proxy)
+
+```
+
+
+
