@@ -1,0 +1,71 @@
+---
+title: 'Workshop 2: Exploratory Data Analysis'
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+  
+---
+
+```{r}
+deaths_16 <- read.csv(file = "deaths_16.csv")[,-1]
+
+external_deaths_16 <- deaths_16 %>% dplyr::filter(res_status != 4, stringr::str_sub(underlying_cause,end=1) %in% c("*U","V","W","X","Y"))
+
+```
+
+
+```{r}
+external_deaths_16 <- external_deaths_16 %>%
+  mutate(place = factor(injury_place, labels = c("Home", "Residential institution", "School/institution", "Sports", "Street", 
+                                                 "Trade/service area", "Industrial/construction", "Farm", "Other specified", 
+                                                 "Other unspecified")),
+         education = ifelse(education_flag == 1, 
+                            cut(as.numeric(education_03), breaks = c(0, 2, 3, 5, 8, 9)),
+                            cut(as.numeric(education_89), breaks = c(0, 11, 12, 15, 17, 99))),
+         education = factor(education, labels = c("Less than HS", "HS/GED", "Some college", "BA+", NA)),
+         intent = factor(death_manner, labels = c("Accident", "Suicide", "Homicide","Pending","Unknown","Natural")),
+         outside_factor = as.factor(ifelse(underlying_cause %in% c("W32","W33","W34","X72","X73","X74","*U014","X93","X94","X95"),"Gun", ifelse(underlying_cause %in% c(paste0("X",c(40:44, 60:64, 85:90)), "U016","U017"), "Drugs", ifelse(underlying_cause %in% c("X78", "X99"), "Sharps", ifelse(underlying_cause %in% c("V02", "V03", "V04","V090","V092","V12","V13","V14", paste0("V19",c(0:2,4:6)), paste0("V", c(20:79,83:86)), "V803","V804","V805","V810","V811","V820","V821",paste0("V87",c(0:8)),paste0("V88",c(0:8)),"V890","V892"), "Motor Vehicles", "Other"))))),
+         age = ifelse(substr(detail_age, 1, 1) == "1", as.numeric(substr(detail_age, 2, 4)), # Year
+                        ifelse(detail_age == 9999, NA, 0)),
+         age = ifelse(age == 999, NA, age),
+         race = ifelse(hispanic > 199 & hispanic <996, "Hispanic",
+                       ifelse(race == "01", "White",
+                              ifelse(race == "02", "Black",
+                                     ifelse(as.numeric(race) >= 4 & as.numeric(race) <= 78, "Asian/Pacific Islander","Native American/Native Alaskan")))),
+         race = ifelse(is.na(race), "Unknown", race))  %>%
+  select(month, intent, sex, age, race, hispanic, place, education, outside_factor)
+
+external_deaths_16[,c(1,3,5)] <- lapply(external_deaths_16[,c(1,3,5)],as.factor)
+
+```
+
+```{r}
+#Correlations
+cor(external_deaths_16[,1:4])
+pairs(external_deaths_16[,1:4])
+
+#Plotting 
+
+
+young_death_16 <- data.frame(external_deaths_16,  young = ifelse(external_deaths_16$age <= 18, 1, 0))
+
+ggplot2::ggplot(data = young_death_16, ggplot2::aes(x = month, y = young)) + 
+  ggplot2::geom_col()
+
+ggplot2::ggplot(data = young_death_16, ggplot2::aes(x = month)) + 
+  ggplot2::geom_bar() +
+  ggplot2::geom_bar(data = subset(young_death_16, young == 1), fill = "tomato") #practice factoring out code
+
+```
+
+
+```{r}
+lin_reg1 <- lm(age ~ intent,data = external_deaths_16)
+summary(lin_reg1)
+
+
+```
+
+
+
