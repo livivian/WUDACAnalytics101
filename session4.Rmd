@@ -1,0 +1,165 @@
+---
+title: 'Workshop 4: Building Classification Models'
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+  
+---
+
+# General Principles of Modeling
+
+Models can be built for many reasons:
+* Express unstructured/alternative data in a form that can be fed into later predictive models (ex. document term matrix, topic model)
+* Explanatory - explain relationships between response variable and some features (ex. linear regression)
+* Predict some response variable based on some features (ex. gradient boosted model)
+
+QUESTION: what makes the biggest difference in model performance?
+
+# High Level Overview of Common Models
+
+A quick and dirty list of popular models and when to use them:
+1. Linear regression
+  + Prediction and explanatory
+  + Structured data with linear relationships, no collinearity
+  + Continuous response variable
+  + Packages: base R
+2. Logistic regression
+  + Prediction and explanatory
+  + Structured data with nonlinear relationships
+  + Binary classification; can be extended to multiple classes
+  + Packages: base R
+3. LASSO
+  + Variation of linear/logistic regression, using algorithm to reduce number of features
+  + Packages: glmnet
+4. Random Forest/Gradient Boosted Machines
+  + Mostly prediction, not much explanatory
+  + Can avoid overfitting and automatically "capture" interactions between features
+  + Structured data with nonlinear relationships
+  + Continuous or classification
+  + Packages: randomForest, gbm
+5. Neural Nets
+  + Prediction only
+  + Unstructured data
+  + Continuous or classification
+  + Can't easily engineer features to capture info
+  + Packages: neuralnet
+
+# Applications in CDC Cause of Death Data
+```{r}
+library(caret)
+library(dplyr)
+library(e1071)
+library(stringr)
+library(ggplot2)
+library(gbm)
+library(glmnet)
+library(Matrix)
+library(plotROC)
+library(randomForest)
+library(xgboost)
+
+```
+
+```{r}
+external_deaths_16 <- read.csv("data_session4.csv")[,-1]
+str(external_deaths_16)
+sapply(external_deaths_16, function(x) sum(is.na(x)))
+external_deaths_16 <- na.omit(external_deaths_16)
+
+set.seed(123)
+known_violent_intent <- subset(external_deaths_16, intent %in% c("Accident", "Suicide", "Homicide"))
+known_violent_intent$intent <- droplevels(known_violent_intent$intent)
+test.index <- sample(nrow(known_violent_intent), 100000)
+data_test <- known_violent_intent[test.index,]
+data_train <- known_violent_intent[-test.index,]
+```
+
+##Building and Testing Predictive Models
+
+##Logistic Regression
+
+Predict sex.
+```{r}
+#Predict based on age
+glm1 <- glm(sex~age, data = external_deaths_16, family = binomial(logit))
+par(mfrow=c(1,1))
+plot(jitter(as.numeric(external_deaths_16$sex)-1, factor=1) ~ external_deaths_16$age, 
+     pch=as.numeric(external_deaths_16$sex)+2, col=external_deaths_16$sex, 
+     ylab="Obs'n", xlab="Age")
+abline(v=-1.6328757/-0.0169034, lwd=5, col="blue")
+legend("topleft", legend=c("0", "1"), pch=c(3,4),
+       col=unique(external_deaths_16$sex))
+
+# How can we make this graph more readable?
+glm_plot_data <- external_deaths_16[sample(nrow(external_deaths_16), 2000),]
+glm2 <- glm(sex~age, data = glm_plot_data, family = binomial(logit))
+par(mfrow=c(1,1))
+plot(jitter(as.numeric(glm_plot_data$sex)-1, factor=1) ~ glm_plot_data$age, 
+     pch=as.numeric(glm_plot_data$sex)+2, col=glm_plot_data$sex, 
+     ylab="Obs'n", xlab="Age")
+abline(v=-1.717132/-0.017549, lwd=5, col="blue")
+legend("topleft", legend=c("0", "1"), pch=c(3,4),
+       col=unique(glm_plot_data$sex))
+
+#Model using all features
+glm3 <- glm(sex~., external_deaths_16, family = binomial(logit))
+summary(glm3)
+glm3 <- glm(sex~., data_train, family = binomial(logit))
+predict_glm <- predict(glm3, newdata = data_test)
+ggplot2::ggplot(data.frame(obs = as.integer(data_test$sex)-1, pred = predict_glm), aes(d = obs, m = pred)) + 
+  plotROC::geom_roc(labels = FALSE) + 
+  ggplot2::theme_minimal()
+
+```
+
+## Decision Tree Based Methods
+
+### Random Forest
+
+```{r}
+# Try randomForest
+rf <- randomForest::randomForest(formula = intent~., data = data_train, xtest = data_test[,-2], ytest = data_test[,2], importance = TRUE, ntree = 100)
+rf <- randomForest::randomForest(formula = intent~., data = data_train, xtest = data_test[,-2], ytest = data_test[,2], importance = TRUE, ntree = 500)
+plot(rf, log = "y")
+print(rf)
+round(randomForest::importance(rf), 2)
+
+```
+
+### Gradient Boosted Machine
+
+```{r}
+gbm1 <- gbm::gbm(intent~., data = data_train, n.trees = 100, interaction.depth = 2, cv.folds = 3) #what distribution are we implicitly using?
+gbm::gbm.perf(gbm1)
+
+gbm2 <- gbm::gbm(intent~., data = data_train, n.trees = 2000, interaction.depth = 2, cv.folds = 3) 
+best.iter <- gbm.perf(gbm2,method="cv")
+print(pretty.gbm.tree(gbm2,1))
+print(pretty.gbm.tree(gbm2,gbm2$n.trees))
+summary(gbm2)
+plot.gbm(gbm2, 5, best.iter)
+
+predict_test <- predict(gbm2, newdata = data_test, n.trees = best.iter, type='response')
+pred_class <- apply(predict_test, 1, which.max)
+pred_class <- factor(pred_class, labels = c("Accident", "Suicide", "Homicide"))
+caret::confusionMatrix(pred_class, data_test[,2])
+
+```
+
+### XGBoost
+```{r}
+data_xgb_train <- Matrix::sparse.model.matrix(intent ~., data_train)[,-1]
+xgb_model <- xgboost::xgboost(data = data_xgb_train, label = as.integer(data_train$intent)-1, max_depth = 2, num_class = 3, nrounds = 3, objective = "multi:softmax") 
+
+data_xgb_test <- Matrix::sparse.model.matrix(intent ~., data_test)[,-1]
+xgb_pred <-predict(xgb_model, newdata = data_xgb_test)
+xgb_pred <- factor(xgb_pred, labels = c("Accident", "Suicide", "Homicide"))
+caret::confusionMatrix(xgb_pred, data_test[,2])
+```
+
+What if we use a different package? Caret allows for tuning algorithm hyperparameters, using a grid search.
+```{r}
+caret_gbm <- caret::train(form = intent~., data = data_train, method = "gbm", trControl = trainControl(method = "cv", number = 5, verbose = FALSE), tuneGrid = data.frame(n.trees = 10, interaction.depth = 2, shrinkage = 0.001, n.minobsinnode = 10)) 
+caret_gbm_tune <- caret::train(form = intent~., data = data_train, method = "gbm", trControl = trainControl(method = "cv", number = 5, verbose = FALSE), expand.grid = data.frame(n.trees = c(100, 1000, 2000, 5000), interaction.depth = c(1:5), shrinkage = 0.001, n.minobsinnode = 10))
+```
