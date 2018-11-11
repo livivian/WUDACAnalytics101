@@ -1,0 +1,95 @@
+---
+title: 'Workshop 4: Building Models'
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+  
+---
+
+# General Principles of Modeling
+
+Models can be built for many reasons:
+* Express unstructured/alternative data in a form that can be fed into later predictive models (ex. document term matrix, topic model)
+* Explanatory - explain relationships between response variable and some features (ex. linear regression)
+* Predict some response variable based on some features (ex. gradient boosted model)
+
+# Applications in CDC Cause of Death Data
+```{r}
+library(caret)
+library(dplyr)
+library(e1071)
+library(stringr)
+library(ggplot2)
+library(gbm)
+library(glmnet)
+library(randomForest)
+
+```
+
+```{r}
+external_deaths_16 <- read.csv("data_session4.csv")[,-1]
+
+set.seed(123)
+known_violent_intent <- subset(external_deaths_16, intent %in% c("Accident", "Suicide", "Homicide"))
+known_violent_intent$intent <- droplevels(known_violent_intent$intent)
+test.index <- sample(nrow(known_violent_intent), 100000)
+data_test <- known_violent_intent[test.index,]
+data_train <- known_violent_intent[-test.index,]
+```
+
+##Logistic Regression
+
+```{r}
+#Predict sex based on age
+glm1 <- glm(sex~age, data = external_deaths_16, family = binomial(logit))
+par(mfrow=c(1,1))
+plot(jitter(as.numeric(external_deaths_16$sex)-1, factor=1) ~ external_deaths_16$age, 
+     pch=as.numeric(external_deaths_16$sex)+2, col=external_deaths_16$sex, 
+     ylab="Obs'n", xlab="Age")
+abline(v=-1.62188/-0.01662, lwd=5, col="blue")
+legend("topleft", legend=c("0", "1"), pch=c(3,4),
+       col=unique(external_deaths_16$sex))
+
+# How can we make this graph more readable?
+
+# Write a call to predict using all features
+
+```
+
+## Decision Tree Based Methods
+```{r}
+# Try randomForest
+rf <- randomForest::randomForest(formula = intent~., data = data_train, xtest = data_test[,-2], ytest = data_test[,2], importance = TRUE, ntree = 100)
+
+# How many trees should we try?
+plot(rf, log = "y")
+print(rf)
+round(randomForest::importance(rf), 2)
+
+```
+
+```{r}
+gbm1 <- gbm::gbm(intent~., data = data_train, n.trees = 100, interaction.depth = 2, cv.folds = 3) #what distribution are we implicitly using?
+gbm::gbm.perf(gbm1)
+
+# How many trees should we try for our second attempt?
+best.iter <- gbm.perf(gbm2,method="cv")
+print(pretty.gbm.tree(gbm2,1))
+print(pretty.gbm.tree(gbm2,gbm2$n.trees))
+summary(gbm2)
+plot.gbm(gbm2, 5, best.iter)
+
+predict_test <- predict(gbm2, newdata = data_test, n.trees = best.iter, type='response')
+pred_class <- apply(predict_test, 1, which.max)
+pred_class <- factor(pred_class, labels = c("Accident", "Suicide", "Homicide"))
+caret::confusionMatrix(pred_class, data_test[,2])
+
+```
+
+What if we use a different package?
+
+```{r}
+#random forest, GBM, xgboost
+
+```
