@@ -1,0 +1,39 @@
+---
+title: "Practice Problems"
+author: "Vivian Li"
+date: "November 18, 2018"
+output: html_document
+---
+
+Session 1
+```{r}
+#Write your code here!
+
+#1. Add a column to the iris datafame that is defined as Petal.Length/Petal.Width; call this column Ratio.
+
+#2. Try changing the Sepal.Width column name on the iris data --> Sepal Width, with a space. 
+
+
+#3. What is the average Petal.Length for each species?
+
+```
+
+Session 2
+```{r}
+#Pick two datasets of your choice and attempt to replicate what we did in the session!
+```
+
+Session 3
+```{r}
+#1. Construct a new feature from the deaths_16.csv data that captures information we've currently thrown away. To help you, here is the reference guide to the dataset: https://www.cdc.gov/nchs/data/dvs/Multiple_Cause_Record_Layout_2016.pdf and here is a reference website for ICD-10 codes: https://www.icd10data.com/ICD10CM/Codes
+
+#2. Try running the commented out lines 87-88 in the RMarkdown. Why doesn't this work? How could you run a correlation analysis between age and outside factor in death?
+```
+
+Session 4
+```{r}
+#1. On line 101, we use 50% as our classificaiton threshold. Try changing this so that 25% is our classification threshold, and examine the results. Why might we pick a lower threshold?
+
+#2. Try running a GBM to predict intent, but with 5 cross validation folds and an interaction depth of 1. What does this mean? How does this model perform differently from the one we made?
+```
+
