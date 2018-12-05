@@ -1,0 +1,385 @@
+---
+title: "Time Series"
+author: "WUDAC Analytics 101"
+date: "27 November 2018"
+output: 
+  beamer_presentation:
+    theme: "Madrid"
+    colortheme: "seahorse"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      tidy = TRUE, fig.width = 4.5, fig.height = 2.5,
+                      fig.align='center', dev = 'pdf')
+library(ggplot2)
+library(lmtest)
+library(tsoutliers)
+library(Rmisc)
+library(forecast)
+```
+
+## Contents
+
+- What is "time series" and what are its applications?
+- The data-generating process 
+- Trend and seasonality
+- Serial correlation
+
+## What is "time series" and what are its applications?
+- Like any other regression, except your dependent variable ($y$) changes **over time**
+- Used for forecasting and prediction
+- Applications: Mostly social science!
+    - Economics
+    - Finance
+    - Business 
+    - Political science
+
+## The data-generating process 
+- Say that we want to forecast a certain variable. Let's call this variable $y$. We first set it up in a regression on many other predictive variables:
+$$
+y_t = \beta_0 + \beta_1 x_{1,t} +\beta_2 x_{2,t} + \cdots +\beta_K x_{K,t} + \varepsilon_t \text{,}
+$$
+where we call $\beta_0$ the **intercept**, the other $\beta_i$'s the **(partial) slope coefficients**, and the corresponding $x_i$'s the **features**. The $\varepsilon$ at the end is called the **error**. 
+
+- **Note:** We assume that errors of the regression have a normal distribution with mean zero and a constant variance $\sigma ^2$:
+$$
+\varepsilon_t \sim \mathcal{N} \left( 0, \sigma^2 \right)\text{.}
+$$
+
+## Our final goal: Reducing the residuals to white noise
+
+- Define a **residual** as the difference between the actual value of what we are interested in forecasting and our forecasted value produced by our model:
+$$
+e_t \stackrel{\text{def}}{=} y_t - \hat {y} _t \text{.}
+$$
+
+- Our residuals $\{ e_t \}$ are a great estimate of the errors of our underlying model, $\{ \varepsilon _t \}$. Since we assume our errors to be randomly normally distributed around zero, we also want our residuals to have such a distribution (we will say we want our residuals to look like **white noise**). **This will be our primary criterion for model evaluation**.
+
+## Trend
+- Sometimes, the variable that we are trying to explain ($y$) has long-term trends that we try to explain. We can capture this effect by simply regressing on time:
+$$
+y_t = \beta_0 + \beta_1 t + \varepsilon_t \text{.}
+$$
+
+- If we want to capture nonlinear effects of changes in time on our variable of interest, then we can add a time-squared term to the regression (This is called a **second-order Taylor approximation**):
+$$
+y_t = \beta_0 + \beta_1 t + \beta_2 t^2 + \varepsilon_t \text{.}
+$$
+
+## Seasonality
+- Sometimes our variable of interest $y$ may systematically behave certain ways during some seasons and other times during other seasons. We can capture this effect in our model by regressing on 
+**seasonal dummies**: a set of binary variables (0 or 1) that indicate which season $y_t$ falls in.
+
+- We can define "seasons" any way we want. If we have $K$ seasons, we should include a maximum of $K-1$ seasonal dummies in the regression to avoid collinearity among the features and the intercept:
+$$
+\begin{aligned}
+y_t &= \beta_0 + \beta_1 t + \beta_2 t^2 + \beta_3 \mathrm{summer}_t \\
+& + \beta_4 \mathrm{fall}_t +\beta_5 \mathrm{winter}_t + \varepsilon_t \text{.}
+\end{aligned}
+$$
+For example, in this regression, $\mathrm{summer}_t$ is $1$ when $t$ is in the summer and $0$ otherwise.
+
+## Serial Correlation
+- After we regress on trend and seasonality, we may still notice that the residuals aren't quite white noise. This suggests that our model is not quite fully specified—It means that we're leaving predictive features on the table. 
+
+- A prime example of one of such characteristics we might observe is persistence of residuals. We can capture these effects by regressing on lagged values of the dependent variable:
+$$
+\begin{aligned}
+y_t &= \beta_0 + \beta_1 t + \beta_2 t^2 + \beta_3 \mathrm{summer}_t \\
+& + \beta_4 \mathrm{fall}_t +\beta_5 \mathrm{winter}_t + \beta_6 y_{t-1} + \varepsilon_t\text{.}
+\end{aligned}
+$$
+But we could regress on many more than just one lagged value. But how do we decide how many lags to regress on? We can use AIC or BIC to decide.
+
+## Our Example: Monthly U.S. Gasoline Sales from 1992 to 2018
+```{r}
+raw_data = read.csv("RSGASSN.csv")
+data <- raw_data[2:322,]
+names(data) <- c("date", "sales")
+data$time <- 1:nrow(data) 
+```
+- Let's look at the distribution of sales.
+```{r}
+p1 <- ggplot(data, aes(x=time, y=sales)) +
+  geom_line() + ggtitle("Sales over time")
+p2 <- ggplot(data, aes(sample = sales)) +
+  stat_qq() +
+  stat_qq_line() + ggtitle("Normal QQ plot of sales")
+multiplot(p1, p2, cols=2)
+```
+
+## Logging the data
+
+- Let's try logging our data to tighten the variance. We're also more interested in **changes** in gasoline sales, and considering the logarithm as our dependent variable allows us to do that when we interpret our model later on.
+```{r}
+data$logsales <- log(data$sales)
+p1 <- ggplot(data, aes(x=time, y=logsales)) +
+  geom_line() + ggtitle("Log sales over time")
+p2 <- ggplot(data, aes(sample = logsales)) +
+  stat_qq() +
+  stat_qq_line() + ggtitle("Normal QQ plot of log sales")
+multiplot(p1, p2, cols=2)
+```
+
+## A naive model: sample average
+
+- Let's build a naive regression of log sales on time. What if we just took the sample average?
+```{r}
+naive_model <- lm(logsales~1, data)
+data_fitted <- data
+data_fitted$logsales <- data.frame(naive_model$fitted.values)[,1]
+ggplot(data,aes(x=time,y=logsales)) + 
+  geom_line(aes(color = "actual")) +
+  geom_line(data=data_fitted, aes(color = "fitted")) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Sample average of log sales")
+```
+
+## A naive model: sample average
+
+- Note that our residuals are certainly anything **but** white noise:
+```{r}
+data$naive_residuals <- naive_model$residuals
+ggplot(data,aes(x=time,y=naive_residuals)) +
+  geom_line() + ggtitle("Residuals of sample average model")
+```
+
+## A better model: regressing on time (trend)
+
+- What if we also regressed on a time vector?
+```{r}
+time_model <- lm(logsales~time, data)
+data_fitted <- data
+data_fitted$logsales <- data.frame(time_model$fitted.values)[,1]
+ggplot(data,aes(x=time,y=logsales)) + 
+  geom_line(aes(color = "actual")) +
+  geom_line(data=data_fitted, aes(color = "fitted")) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Log sales regressed on time")
+```
+
+## A better model: regressing on time (trend)
+
+- This kind of upward slope is referred to as **trend**. Let's do a significance test to see if this is a statistically significant phenomenon in our model:
+```{r}
+coef(summary(time_model))[,c(1,4)]
+```
+
+## A better model: regressing on time (trend)
+
+- Our residuals now closer to white noise, but it defintely doesn't look random. There's larger some slope to it that we could perhaps take advantage of.
+```{r}
+data$time_residuals <- time_model$residuals
+ggplot(data,aes(x=time,y=time_residuals)) +
+  geom_line() + ggtitle("Residuals of time model")
+```
+
+## Picking up second-order time effects
+
+```{r}
+data$time2 <- data$time ^2
+time_sq_model <- lm(logsales ~ time + time2, data)
+data_fitted <- data
+data_fitted$logsales <- data.frame(time_sq_model$fitted.values)[,1]
+ggplot(data,aes(x=time,y=logsales)) + 
+  geom_line(aes(color = "actual")) +
+  geom_line(data=data_fitted, aes(color = "fitted")) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Log sales regressed on time and time squared") 
+```
+
+## Picking up second-order time effects
+
+- All our variables are statistically significant:
+```{r}
+coef(summary(time_sq_model))[,c(1,4)]
+```
+
+## Picking up second-order time effects
+
+- Our residuals now look more random than before, but there's a recurring cyclical pattern we can take advantage of.
+
+```{r}
+data$time_sq_residuals <- time_sq_model$residuals
+ggplot(data,aes(x=time,y=time_sq_residuals)) +
+  geom_line() + ggtitle("Residuals of time model")
+```
+
+## Seasonality
+
+```{r}
+data$month <- NA
+for (i in 1:(dim(data)[1])){
+  x = strsplit(as.character(data$date[i]), "-")
+  data$month[i] <- as.numeric(x[[1]][2])
+}
+data$month <- as.factor(data$month)
+
+month_model <- lm(logsales ~ time +  time2 + month, data)
+data_fitted <- data
+data_fitted$logsales <- data.frame(month_model$fitted.values)[,1]
+ggplot(data,aes(x=time,y=logsales)) +
+  geom_line(aes(color = "actual")) +
+  geom_line(data=data_fitted, aes(color = "fitted")) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Log sales regressed on time, time^2, and monthly dummies")
+```
+
+## Seasonality
+
+Taking a look at a full statistical summary of the model, notice that the February, November, and December dummies are insignificant even at the 0.1 level. Let's pull these out of the model.
+```{r}
+summary(month_model)
+```
+
+## Seasonality
+
+```{r}
+significant_months <- c(3,4,5,6,7,8,9,10)
+significant_months_regressors <- as.vector(matrix(0,length(significant_months)))
+for(i in 1:length(significant_months)){
+  significant_months_regressors[i] <- paste("I(month==",significant_months[i],")")
+}
+regressors <- c("time", "time2", significant_months_regressors)
+reduced_month_formula <- as.formula(paste("logsales", "~",paste(paste(regressors,sep=""), collapse = "+")))
+
+reduced_month_model <- lm(reduced_month_formula, data)
+data_fitted <- data
+data_fitted$logsales <- data.frame(reduced_month_model$fitted.values)[,1]
+ggplot(data,aes(x=time,y=logsales)) +
+  geom_line(aes(color = "actual")) +
+  geom_line(data=data_fitted, aes(color = "fitted")) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Log sales regressed on time, time^2, and reduced monthly dummies")
+```
+
+## Seasonality
+
+- Now, we see that all the features are significant:
+```{r}
+summary(reduced_month_model)
+```
+
+## Seasonality
+
+- What do our residuals look like now?
+```{r}
+data$reduced_month_residuals <- reduced_month_model$residuals
+ggplot(data,aes(x=time,y=reduced_month_residuals)) +
+  geom_line() + ggtitle("Residuals of reduced month model")
+```
+
+## Seasonality
+
+- Notice how our residuals show **persistence**: positive for a while, then negative for a while... This is caused by business cycles! But how do we capture this?
+
+## Regressing on lagged log sales
+
+- Looking at the correlations of log sales with past values of log sales
+```{r}
+dwtest(reduced_month_model)
+```
+
+## Regressing on lagged log sales
+
+```{r}
+acf(reduced_month_model$residuals)
+```
+
+## Regressing on lagged log sales
+
+```{r}
+pacf(reduced_month_model$residuals)
+```
+
+## Regressing on lagged log sales
+
+- Let's build the model.
+```{r}
+lagged_sales <- raw_data[1:321,2]
+
+data$lagged_log_sales <- log(lagged_sales)
+
+regressors <- c("time", "time2", significant_months_regressors, "lagged_log_sales")
+reduced_month_lag_formula <- as.formula(paste("logsales", "~",paste(paste(regressors,sep=""), collapse = "+")))
+
+reduced_month_lag_model <- lm(reduced_month_lag_formula, data)
+data_fitted <- data
+data_fitted$logsales <- data.frame(reduced_month_lag_model$fitted.values)[,1]
+ggplot(data,aes(x=time,y=logsales)) +
+  geom_line(aes(color = "actual")) +
+  geom_line(data=data_fitted, aes(color = "fitted")) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Log sales regressed on time, time^2, reduced monthly dummies, and 1 lag")
+
+```
+
+## Regressing on lagged log sales
+
+- Looking at the residuals:
+```{r}
+data$reduced_month_lag_residuals <- reduced_month_lag_model$residuals
+ggplot(data,aes(x=time,y=reduced_month_lag_residuals)) +
+  geom_line() + ggtitle("Residuals of reduced month with lag model")
+```
+
+## Testing forecasting accuracy
+
+```{r,warning=F}
+
+UNTIL <- 125
+
+month_rep_vec <- rep(c(as.numeric(data[(UNTIL+1),"month"]):12,1:as.numeric(data[(UNTIL),"month"])),500)
+
+old_data <- data
+end <- nrow(data)
+
+actual_data <- old_data
+
+time_fut <- (UNTIL+1):end
+time2_fut <- time_fut^2
+month_fut <- head(month_rep_vec,length(time_fut))
+lag_fut <- data$logsales[UNTIL]
+forecast_vals <- as.vector(matrix(0,length(time_fut)))
+beta <- data.frame(coef(reduced_month_lag_model))[,1]
+se <- summary(reduced_month_lag_model)[[6]]
+lcl <- as.vector(matrix(0,length(time_fut)))
+ucl <- as.vector(matrix(0,length(time_fut)))
+for (i in 1:length(time_fut)){
+  forecast_vals[i] <- ( beta[1] + 
+                          beta[2] * time_fut[i] + 
+                          beta[3] * time2_fut[i] +
+                          beta[4] * (month_fut[i] == 3) +
+                          beta[5] * (month_fut[i] == 4) +
+                          beta[6] * (month_fut[i] == 5) +
+                          beta[7] * (month_fut[i] == 6) +
+                          beta[8] * (month_fut[i] == 7) +
+                          beta[9] * (month_fut[i] == 8) +
+                          beta[10] * (month_fut[i] == 9) +
+                          beta[11] * (month_fut[i] == 10) +
+                          beta[12] * lag_fut)
+  lag_fut <- forecast_vals[i]
+  lcl[i] <- forecast_vals[i] - 1.96*se
+  ucl[i] <- forecast_vals[i] + 1.96*se
+}
+
+forecast_data <- actual_data
+lcl_data <- actual_data
+ucl_data <- actual_data
+forecast_data$logsales[(UNTIL+1):end] <- forecast_vals
+lcl_data$logsales[(UNTIL+1):end] <- lcl
+ucl_data$logsales[(UNTIL+1):end] <- ucl
+forecast_data$logsales[1:UNTIL] <- NA
+lcl_data$logsales[1:UNTIL] <- NA
+ucl_data$logsales[1:UNTIL] <- NA
+
+ggplot(actual_data,aes(x=time,y=logsales)) +
+  geom_line(aes(color = "actual")) +
+  geom_line(data=forecast_data, aes(color = "forecast")) +
+  geom_line(data=lcl_data, aes(color = "LCL")) +
+  geom_line(data=ucl_data, aes(color = "UCL")) +
+  scale_color_manual(values=c("black", "red", "pink", "pink")) +
+  ggtitle("Forecasts")
+
+```
