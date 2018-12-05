@@ -5,7 +5,6 @@ Created on Wed Nov 21 14:30:03 2018
 
 @author: Max Roling
 """
-#I am putting this file in the google drive because I don't want to post it to the public GitHub page just yet
 
 import pandas as pd
 from statsmodels.tsa.ar_model import AR
